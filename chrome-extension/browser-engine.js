@@ -446,8 +446,25 @@
       return `${chrome.runtime.getURL(`metric-src/${fileName}`)}?${cacheBust}`
     }
 
-    const normalizedBase = String(metricBaseUrl).replace(/\/+$/, '')
-    return `${normalizedBase}/${fileName}?${cacheBust}`
+    const baseHint = (typeof document !== 'undefined' && document.baseURI)
+      ? document.baseURI
+      : ((typeof self !== 'undefined' && self.location && self.location.href) ? self.location.href : undefined)
+
+    const normalizedBaseInput = String(metricBaseUrl || 'metric-src').replace(/\/+$/, '')
+    const absoluteBase = (() => {
+      try {
+        const baseUrl = new URL(normalizedBaseInput, baseHint || undefined)
+        return `${baseUrl.href.replace(/\/+$/, '')}/`
+      } catch {
+        return `${normalizedBaseInput}/`
+      }
+    })()
+
+    try {
+      return new URL(`${fileName}?${cacheBust}`, absoluteBase).href
+    } catch {
+      return `${absoluteBase}${fileName}?${cacheBust}`
+    }
   }
 
   async function loadMetricFromSource (metricId, runToken, options = {}) {

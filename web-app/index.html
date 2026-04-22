@@ -100,7 +100,7 @@
   <script src="../chrome-extension/vendor/d3.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
-    window.__VTJMETRICS_METRIC_BASE_URL = '../chrome-extension/metric-src';
+    window.__VTJMETRICS_METRIC_BASE_URL = new URL('../chrome-extension/metric-src/', window.location.href).href;
   </script>
   <script src="../chrome-extension/browser-engine.js"></script>
   <script src="./app.js"></script>

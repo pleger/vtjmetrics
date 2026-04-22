@@ -29,6 +29,15 @@
     }
   }
 
+  const METRIC_BASE_URL = (() => {
+    const configured = window.__VTJMETRICS_METRIC_BASE_URL || '../chrome-extension/metric-src/'
+    try {
+      return new URL(String(configured), window.location.href).href
+    } catch {
+      return String(configured)
+    }
+  })()
+
   function byId (id) {
     return document.getElementById(id)
   }
@@ -986,7 +995,7 @@
           ref: explicitRef || parsed.ref,
           sourcePath,
           githubToken: byId('github-token').value.trim(),
-          metricBaseUrl: '../chrome-extension/metric-src'
+          metricBaseUrl: METRIC_BASE_URL
         })
 
         state.sourceType = `GitHub: ${parsed.owner}/${parsed.repo}`
@@ -998,7 +1007,7 @@
           filesByPath,
           sourcePath: sourcePathInput,
           projectName: byId('project-name').value.trim() || 'local-project',
-          metricBaseUrl: '../chrome-extension/metric-src'
+          metricBaseUrl: METRIC_BASE_URL
         })
 
         state.sourceType = `ZIP: ${zipFile?.name || 'uploaded'}`

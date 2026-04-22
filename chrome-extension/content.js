@@ -505,7 +505,7 @@ function buildPanelHtml (repoContext) {
         </p>
         <div id="${VT_VIZ_CANVAS_ID}" class="vtjmetrics-viz-canvas"></div>
         <div id="${VT_VIZ_DETAILS_ID}" class="vtjmetrics-viz-details">
-          Hover a circle to inspect details. Drag circles to reposition. Single click for actions.
+          Hover a circle to inspect details. Drag circles to reposition. Single click opens actions and summary.
         </div>
         <div id="${VT_CONTEXT_MENU_ID}" class="vtjmetrics-context-menu" hidden></div>
       </section>
@@ -753,7 +753,6 @@ function openContextMenuAt (clientX, clientY, nodeData) {
   menu.innerHTML = `
     <button type="button" data-action="remove-node">Remove from graph</button>
     <button type="button" data-action="goto-source">Go to source line</button>
-    <button type="button" data-action="show-summary">Show statistics summary</button>
   `
   menu.hidden = false
 
@@ -1426,7 +1425,7 @@ function renderVisualization () {
     .on('mouseleave', () => {
       fanOutSelection.attr('stroke-opacity', 0.9)
       fanInSelection.attr('stroke-opacity', 0.9)
-      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click for actions.')
+      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click opens actions and summary.')
     })
 
   function updateLinkGeometry () {
@@ -1568,7 +1567,7 @@ function renderVisualization () {
     .on('end', (_event, d) => {
       d.__dragMoved = dragMoved
       setTimeout(() => { d.__dragMoved = false }, 0)
-      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click for actions.')
+      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click opens actions and summary.')
     })
 
   nodeSelection.call(dragBehavior)
@@ -1612,26 +1611,28 @@ function renderVisualization () {
         <span>Lines: <strong>${nodeMeta.lines ?? 0}</strong> | Start line: <strong>${nodeMeta.startLine ?? 1}</strong></span><br>
         <span>Fan-In: <strong>${nodeMeta.fanIn ?? 0}</strong> | Fan-Out: <strong>${nodeMeta.fanOut ?? 0}</strong></span><br>
         <span>Coupling score: <strong>${nodeMeta.value ?? 1}</strong></span><br>
-        <span class="vtjmetrics-hint-inline">Single click for context actions.</span>
+        <span class="vtjmetrics-hint-inline">Single click opens context actions and auto summary.</span>
       `)
     })
     .on('mouseleave', () => {
       nodeSelection.select('circle').attr('opacity', 1)
       fanOutSelection.attr('stroke-opacity', 0.72)
       fanInSelection.attr('stroke-opacity', 0.68)
-      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click for actions.')
+      updateDetails('Hover a circle to inspect details. Drag circles to reposition. Single click opens actions and summary.')
     })
-    .on('click', (event, d) => {
+    .on('click', async (event, d) => {
       if (d.__dragMoved) return
       event.preventDefault()
       event.stopPropagation()
-      openContextMenuAt(event.clientX, event.clientY, {
+      const nodeData = {
         ...d.data.meta,
         metricId: d.data.metricId,
         entityId: d.data.entityId,
         key: d.data.key,
         label: d.data.label
-      })
+      }
+      openContextMenuAt(event.clientX, event.clientY, nodeData)
+      await renderNodeStatisticsSummary(nodeData, nodeData.metricId)
     })
 }
 
@@ -1815,7 +1816,7 @@ function bindVizEvents (repoContext) {
     renderVisualization()
   })
 
-  contextMenu?.addEventListener('click', async (event) => {
+  contextMenu?.addEventListener('click', (event) => {
     const button = event.target.closest('button[data-action]')
     if (!button || !contextMenuNodeData) return
 
@@ -1841,10 +1842,6 @@ function bindVizEvents (repoContext) {
       return
     }
 
-    if (action === 'show-summary') {
-      await renderNodeStatisticsSummary(contextMenuNodeData, contextMenuNodeData.metricId)
-      closeContextMenu()
-    }
   })
 
   if (!contextMenuGlobalListenersBound) {

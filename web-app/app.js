@@ -20,7 +20,9 @@
   const state = {
     result: null,
     sourceType: null,
+    repoContext: null,
     selectedMetricIds: [],
+    hiddenNodeKeys: [],
     edgeMode: EDGE_MODE_ALL,
     lineThresholdByMetricId: {
       'file-coupling': 0,
@@ -28,6 +30,10 @@
       'function-coupling': 0
     }
   }
+
+  const DEFAULT_DETAILS_HTML = 'Click a circle to inspect details and open actions. Click a coupling line to inspect fan-in/fan-out split. Drag circles to reposition.'
+  let contextMenuNodeData = null
+  let contextMenuGlobalListenersBound = false
 
   const METRIC_BASE_URL = (() => {
     const configured = window.__VTJMETRICS_METRIC_BASE_URL || '../chrome-extension/metric-src/'
@@ -90,6 +96,72 @@
 
   function getThresholdForMetric (metricId) {
     return toNonNegativeInt(state.lineThresholdByMetricId?.[metricId], 0)
+  }
+
+  function getNodeKey (metricId, entityId) {
+    return `${metricId}|${entityId}`
+  }
+
+  function getRepoRelativePath (filePath) {
+    if (!filePath) return ''
+    if (!state.repoContext) return filePath.replace(/^\/+/, '')
+
+    const prefix = `/${state.repoContext.owner}/${state.repoContext.repo}/`
+    if (filePath.startsWith(prefix)) return filePath.slice(prefix.length)
+    return filePath.replace(/^\/+/, '')
+  }
+
+  function encodeRepoPathForUrl (path) {
+    return path
+      .split('/')
+      .filter(Boolean)
+      .map(part => encodeURIComponent(part))
+      .join('/')
+  }
+
+  function buildBlobUrlForNode (nodeMeta) {
+    if (!state.repoContext || !nodeMeta?.filePath) return null
+    const repoPath = getRepoRelativePath(nodeMeta.filePath)
+    if (!repoPath) return null
+
+    const line = toNonNegativeInt(nodeMeta.startLine, 1) || 1
+    const ref = encodeURIComponent(state.repoContext.ref || 'HEAD')
+    return `https://github.com/${state.repoContext.owner}/${state.repoContext.repo}/blob/${ref}/${encodeRepoPathForUrl(repoPath)}#L${line}`
+  }
+
+  function getContextMenuElement () {
+    return byId('viz-context-menu')
+  }
+
+  function closeContextMenu () {
+    const menu = getContextMenuElement()
+    if (!menu) return
+    menu.hidden = true
+    menu.innerHTML = ''
+    contextMenuNodeData = null
+  }
+
+  function openContextMenuAt (clientX, clientY, nodeData) {
+    const menu = getContextMenuElement()
+    if (!menu || !nodeData) return
+
+    contextMenuNodeData = nodeData
+    const sourceUrl = buildBlobUrlForNode(nodeData)
+
+    menu.innerHTML = `
+      <button type="button" data-action="remove-node">Remove from graph</button>
+      <button type="button" data-action="goto-source" ${sourceUrl ? '' : 'disabled'}>Go to source line</button>
+    `
+    menu.hidden = false
+
+    const rect = menu.getBoundingClientRect()
+    const menuWidth = rect.width || 220
+    const menuHeight = rect.height || 96
+    const left = Math.max(12, Math.min(window.innerWidth - menuWidth - 12, clientX + 8))
+    const top = Math.max(12, Math.min(window.innerHeight - menuHeight - 12, clientY + 8))
+
+    menu.style.left = `${left}px`
+    menu.style.top = `${top}px`
   }
 
   function getClassesPerFileResult () {
@@ -431,13 +503,17 @@
   function buildVisualizationModel (selectedMetricIds, edgeMode) {
     const graphList = []
     const warnings = []
+    const hiddenNodeKeys = new Set(state.hiddenNodeKeys || [])
 
     for (const metricId of selectedMetricIds) {
       const graph = buildGraphByMetricId(metricId)
       if (!graph) continue
 
       const threshold = getThresholdForMetric(metricId)
-      const filteredNodes = graph.nodes.filter((node) => toNonNegativeInt(node.lines, 0) >= threshold)
+      const filteredNodes = graph.nodes.filter((node) => {
+        const key = getNodeKey(metricId, node.entityId)
+        return !hiddenNodeKeys.has(key) && toNonNegativeInt(node.lines, 0) >= threshold
+      })
       const entitySet = new Set(filteredNodes.map(node => node.entityId))
       const filteredLinks = graph.links.filter(link => entitySet.has(link.sourceEntity) && entitySet.has(link.targetEntity))
 
@@ -551,6 +627,7 @@
   function renderVisualization () {
     const canvas = byId('viz-canvas')
     const emptyMessage = byId('viz-empty')
+    closeContextMenu()
     canvas.innerHTML = ''
 
     if (!state.result) {
@@ -558,6 +635,7 @@
       emptyMessage.textContent = 'Run metrics first, then choose one or more coupling metrics.'
       renderWarnings([])
       renderLegend([])
+      updateDetails(DEFAULT_DETAILS_HTML)
       return
     }
 
@@ -567,6 +645,7 @@
       emptyMessage.textContent = 'Select at least one coupling metric to render.'
       renderWarnings([])
       renderLegend([])
+      updateDetails(DEFAULT_DETAILS_HTML)
       return
     }
 
@@ -578,12 +657,14 @@
       emptyMessage.textContent = 'No elements match current filters. Lower min lines threshold.'
       renderWarnings(model.warnings)
       renderLegend(model.graphList)
+      updateDetails(DEFAULT_DETAILS_HTML)
       return
     }
 
     emptyMessage.hidden = true
     renderLegend(model.graphList)
     renderWarnings(model.warnings)
+    updateDetails(DEFAULT_DETAILS_HTML)
 
     const { width, height } = getSvgSize(canvas)
     const svg = d3.select(canvas)
@@ -678,6 +759,34 @@
       .attr('stroke-linecap', 'round')
       .attr('stroke-opacity', 0.9)
       .style('display', d => d.inFlow > 0 ? null : 'none')
+
+    function formatPercent (value) {
+      return `${(value * 100).toFixed(1)}%`
+    }
+
+    linkSelection
+      .on('click', (event, d) => {
+        event.preventDefault()
+        event.stopPropagation()
+        closeContextMenu()
+
+        fanOutSelection.attr('stroke-opacity', link => link === d ? 0.96 : 0.2)
+        fanInSelection.attr('stroke-opacity', link => link === d ? 0.96 : 0.2)
+
+        const N = Math.max(1, d.totalNodeFlow)
+        const outPct = d.outFlow > 0 ? d.outFlow / N : 0
+        const inPct = d.inFlow > 0 ? d.inFlow / N : 0
+        const label = getMetricLabel(d.metricId)
+
+        updateDetails(`
+          <strong>${label} - Line formula</strong><br>
+          <span>${truncateMiddle(d.sourceNode.data.meta?.fullLabel || d.sourceNode.data.label || '', 80)} → ${truncateMiddle(d.targetNode.data.meta?.fullLabel || d.targetNode.data.label || '', 80)}</span><br>
+          <span>N = fanOut + fanIn = <strong>${d.outFlow}</strong> + <strong>${d.inFlow}</strong> = <strong>${N}</strong></span><br>
+          <span style="color:${FAN_OUT_COLOR}">fan-out width = (${d.outFlow}/${N}) × max = ${formatPercent(outPct)}</span><br>
+          <span style="color:${FAN_IN_COLOR}">fan-in width = (${d.inFlow}/${N}) × max = ${formatPercent(inPct)}</span><br>
+          <span>Edge coupling weight: <strong>${d.edgeWeight}</strong></span>
+        `)
+      })
 
     function getSegmentPoints (link) {
       const source = link.sourceNode
@@ -802,29 +911,52 @@
         nodeSelection.attr('transform', node => `translate(${node.x},${node.y})`)
         updateLinkGeometry()
       })
-      .on('end', function () {
+      .on('end', function (_event, d) {
+        d.__dragMoved = dragMoved
+        setTimeout(() => { d.__dragMoved = false }, 0)
         dragMoved = false
-        updateDetails('Hover a circle to inspect details. Drag circles to reposition.')
+        updateDetails(DEFAULT_DETAILS_HTML)
       })
 
     nodeSelection.call(dragBehavior)
 
     nodeSelection
-      .on('mouseenter', (_event, d) => {
+      .on('click', (event, d) => {
+        if (d.__dragMoved || dragMoved) return
+        event.preventDefault()
+        event.stopPropagation()
+
+        fanOutSelection.attr('stroke-opacity', 0.9)
+        fanInSelection.attr('stroke-opacity', 0.9)
+
         const metricLabel = getMetricLabel(d.data.metricId)
         const nodeMeta = d.data.meta || {}
+        const nodeData = {
+          ...nodeMeta,
+          metricId: d.data.metricId,
+          entityId: d.data.entityId,
+          key: d.data.key,
+          label: d.data.label
+        }
+
+        openContextMenuAt(event.clientX, event.clientY, nodeData)
 
         updateDetails(`
           <strong>${metricLabel}</strong><br>
           <span>${truncateMiddle(nodeMeta.fullLabel || d.data.label, 90)}</span><br>
           <span>Lines: <strong>${nodeMeta.lines ?? 0}</strong> | Start line: <strong>${nodeMeta.startLine ?? 1}</strong></span><br>
           <span>Fan-In: <strong>${nodeMeta.fanIn ?? 0}</strong> | Fan-Out: <strong>${nodeMeta.fanOut ?? 0}</strong></span><br>
-          <span>Coupling score: <strong>${nodeMeta.value ?? 1}</strong></span>
+          <span>Coupling score: <strong>${nodeMeta.value ?? 1}</strong></span><br>
+          <span>Single click menu: remove node / go to source line.</span>
         `)
       })
-      .on('mouseleave', () => {
-        updateDetails('Hover a circle to inspect details. Drag circles to reposition.')
-      })
+
+    svg.on('click', () => {
+      closeContextMenu()
+      fanOutSelection.attr('stroke-opacity', 0.9)
+      fanInSelection.attr('stroke-opacity', 0.9)
+      updateDetails(DEFAULT_DETAILS_HTML)
+    })
   }
 
   function hasMetricResultData (metricId) {
@@ -999,6 +1131,11 @@
         })
 
         state.sourceType = `GitHub: ${parsed.owner}/${parsed.repo}`
+        state.repoContext = {
+          owner: parsed.owner,
+          repo: parsed.repo,
+          ref: result?._meta?.ref || explicitRef || parsed.ref || 'HEAD'
+        }
       } else {
         const zipFile = byId('zip-file').files?.[0]
         const filesByPath = await readZipSources(zipFile)
@@ -1011,9 +1148,11 @@
         })
 
         state.sourceType = `ZIP: ${zipFile?.name || 'uploaded'}`
+        state.repoContext = null
       }
 
       state.result = result
+      state.hiddenNodeKeys = []
 
       const available = getAvailableCouplingMetrics().map(metric => metric.id)
       state.selectedMetricIds = state.selectedMetricIds.filter(metricId => available.includes(metricId))
@@ -1097,6 +1236,51 @@
       renderVisualization()
     })
 
+    const contextMenu = byId('viz-context-menu')
+    contextMenu?.addEventListener('click', (event) => {
+      const button = event.target.closest('button[data-action]')
+      if (!button || !contextMenuNodeData) return
+
+      const action = button.dataset.action
+      if (!action) return
+
+      if (action === 'remove-node') {
+        const key = contextMenuNodeData.key
+        if (key && !state.hiddenNodeKeys.includes(key)) {
+          state.hiddenNodeKeys.push(key)
+        }
+        closeContextMenu()
+        renderVisualization()
+        return
+      }
+
+      if (action === 'goto-source') {
+        const url = buildBlobUrlForNode(contextMenuNodeData)
+        if (url) {
+          window.open(url, '_blank', 'noopener')
+        } else {
+          setStatus('Go to source line is available only in GitHub URL mode.', 'error')
+        }
+        closeContextMenu()
+      }
+    })
+
+    if (!contextMenuGlobalListenersBound) {
+      document.addEventListener('click', (event) => {
+        const menu = getContextMenuElement()
+        if (!menu || menu.hidden) return
+        const target = event.target
+        if (target instanceof Node && menu.contains(target)) return
+        closeContextMenu()
+      })
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') closeContextMenu()
+      })
+
+      contextMenuGlobalListenersBound = true
+    }
+
     const radios = document.querySelectorAll('input[name="source-mode"]')
     radios.forEach((radio) => {
       radio.addEventListener('change', () => {
@@ -1109,6 +1293,7 @@
 
   function bootstrapDefaults () {
     state.selectedMetricIds = ['file-coupling']
+    updateDetails(DEFAULT_DETAILS_HTML)
     renderControls()
     renderVisualization()
   }

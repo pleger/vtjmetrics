@@ -9,7 +9,10 @@
 <body>
   <main class="app-shell">
     <header class="app-header">
-      <h1>VTJMetrics Web <small>v0.1.0</small></h1>
+      <div class="app-header-top">
+        <h1>VTJMetrics Web <small>v0.1.0</small></h1>
+        <a class="docs-link" href="../docs/index.html" target="_blank" rel="noopener">Documentation</a>
+      </div>
       <p>Run JTMetrics from a GitHub repository URL or a ZIP source package. Visualize coupling interactively without the Chrome extension.</p>
     </header>
 
@@ -92,7 +95,8 @@
       <div id="warnings" class="warnings" hidden></div>
       <p id="viz-empty" class="viz-empty">Run metrics first, then choose one or more coupling metrics.</p>
       <div id="viz-canvas" class="viz-canvas"></div>
-      <div id="viz-details" class="viz-details">Hover a circle to inspect details. Drag circles to reposition.</div>
+      <div id="viz-details" class="viz-details">Click a circle to inspect details and open actions. Click a coupling line to inspect fan-in/fan-out split. Drag circles to reposition.</div>
+      <div id="viz-context-menu" class="viz-context-menu" hidden></div>
     </section>
   </main>
 

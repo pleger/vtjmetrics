@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VTJMetrics Docs - Getting Started</title>
+  <link rel="stylesheet" href="./assets/docs.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <p class="brand">VTJMetrics Docs</p>
+      <p class="subtitle">Visualization Toolkit for JTMetrics</p>
+      <nav class="nav">
+        <a href="./index.html">Overview</a>
+        <a class="active" href="./getting-started.html">Getting Started</a>
+        <a href="./web-app.html">Web App</a>
+        <a href="./extension.html">Chrome Extension</a>
+        <a href="./architecture.html">Architecture</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <section class="card">
+          <h1>Getting Started</h1>
+          <h2>1. Clone</h2>
+<pre><code>git clone https://github.com/pleger/vtjmetrics.git
+cd vtjmetrics</code></pre>
+
+          <h2>2. Open the web app</h2>
+          <p>Serve the project root with any static server and open <code>/web-app/index.html</code>.</p>
+<pre><code>npx serve .
+# then visit http://localhost:3000/web-app/index.html</code></pre>
+
+          <h2>3. Load extension</h2>
+          <ol>
+            <li>Open <code>chrome://extensions</code></li>
+            <li>Enable Developer mode</li>
+            <li>Load unpacked -> select <code>chrome-extension/</code></li>
+          </ol>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

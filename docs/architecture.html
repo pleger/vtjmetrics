@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VTJMetrics Docs - Architecture</title>
+  <link rel="stylesheet" href="./assets/docs.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <p class="brand">VTJMetrics Docs</p>
+      <p class="subtitle">Visualization Toolkit for JTMetrics</p>
+      <nav class="nav">
+        <a href="./index.html">Overview</a>
+        <a href="./getting-started.html">Getting Started</a>
+        <a href="./web-app.html">Web App</a>
+        <a href="./extension.html">Chrome Extension</a>
+        <a class="active" href="./architecture.html">Architecture</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <section class="card">
+          <h1>Architecture</h1>
+          <h2>Shared Runtime</h2>
+          <p>Both products reuse the same metric runtime:</p>
+          <ul>
+            <li><code>chrome-extension/browser-engine.js</code></li>
+            <li><code>chrome-extension/metric-src/*.metric.js</code></li>
+          </ul>
+
+          <h2>Execution Paths</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Input</th>
+                <th>Entry point</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>GitHub repository</td>
+                <td><code>runJTMetricsInBrowser(payload)</code></td>
+              </tr>
+              <tr>
+                <td>ZIP or file map</td>
+                <td><code>runJTMetricsFromFilesInBrowser(payload)</code></td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2>Design Decision</h2>
+          <p>Metric loading resolves from Chrome runtime URLs in extension mode and from configurable base URL in web mode, reducing duplicated logic.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VTJMetrics Web</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>VTJMetrics Web <small>v0.1.0</small></h1>
+      <p>Run JTMetrics from a GitHub repository URL or a ZIP source package. Visualize coupling interactively without the Chrome extension.</p>
+    </header>
+
+    <section class="card">
+      <h2>Source Input</h2>
+
+      <div class="mode-toggle" role="radiogroup" aria-label="Source mode">
+        <label><input type="radio" name="source-mode" value="github" checked /> GitHub URL</label>
+        <label><input type="radio" name="source-mode" value="zip" /> ZIP upload</label>
+      </div>
+
+      <div id="github-mode" class="mode-panel">
+        <label for="repo-url">GitHub URL</label>
+        <input id="repo-url" type="url" placeholder="https://github.com/owner/repo or https://github.com/owner/repo/tree/main/src" />
+
+        <div class="grid two">
+          <div>
+            <label for="repo-ref">Ref (optional)</label>
+            <input id="repo-ref" type="text" placeholder="main" />
+          </div>
+          <div>
+            <label for="github-token">GitHub Token (optional)</label>
+            <input id="github-token" type="password" placeholder="ghp_..." />
+          </div>
+        </div>
+      </div>
+
+      <div id="zip-mode" class="mode-panel" hidden>
+        <label for="zip-file">ZIP file</label>
+        <input id="zip-file" type="file" accept=".zip,application/zip" />
+      </div>
+
+      <div class="grid two">
+        <div>
+          <label for="source-path">Source path</label>
+          <input id="source-path" type="text" value="src" placeholder="src" />
+        </div>
+        <div>
+          <label for="project-name">Project name (ZIP mode)</label>
+          <input id="project-name" type="text" value="local-project" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="run-btn" type="button">Calculate metrics</button>
+        <button id="download-btn" type="button" hidden>Download JSON</button>
+      </div>
+
+      <p id="status" class="status" data-type="info">Ready.</p>
+    </section>
+
+    <section class="card">
+      <h2>Coupling Visualization</h2>
+      <p class="muted">Select coupling metrics, reorder precedence, apply thresholds, and explore links by fan-out (red) and fan-in (blue).</p>
+
+      <div class="grid two controls-grid">
+        <div>
+          <label for="metric-select">Metric to add</label>
+          <div class="inline-row">
+            <select id="metric-select"></select>
+            <button id="add-metric-btn" type="button">Add</button>
+          </div>
+        </div>
+
+        <div>
+          <label for="edge-mode">Display mode</label>
+          <select id="edge-mode">
+            <option value="all">Show all selected coupling levels</option>
+            <option value="last">Show only last precedence coupling</option>
+          </select>
+        </div>
+      </div>
+
+      <div>
+        <label>Precedence (first = outer, last = inner)</label>
+        <ul id="selected-list" class="selected-list"></ul>
+      </div>
+
+      <div id="legend" class="legend"></div>
+      <div id="warnings" class="warnings" hidden></div>
+      <p id="viz-empty" class="viz-empty">Run metrics first, then choose one or more coupling metrics.</p>
+      <div id="viz-canvas" class="viz-canvas"></div>
+      <div id="viz-details" class="viz-details">Hover a circle to inspect details. Drag circles to reposition.</div>
+    </section>
+  </main>
+
+  <script src="../chrome-extension/vendor/babel.min.js"></script>
+  <script src="../chrome-extension/vendor/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script>
+    window.__VTJMETRICS_METRIC_BASE_URL = '../chrome-extension/metric-src';
+  </script>
+  <script src="../chrome-extension/browser-engine.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

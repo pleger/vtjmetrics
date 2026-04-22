@@ -1,0 +1,433 @@
+:root {
+  --vt-fg: var(--fgColor-default, var(--color-fg-default, #24292f));
+  --vt-muted: var(--fgColor-muted, var(--color-fg-muted, #57606a));
+  --vt-canvas: var(--bgColor-default, var(--color-canvas-default, #ffffff));
+  --vt-subtle: var(--bgColor-muted, var(--color-canvas-subtle, #f6f8fa));
+  --vt-inset: var(--bgColor-inset, var(--color-canvas-inset, #f6f8fa));
+  --vt-border: var(--borderColor-default, var(--color-border-default, #d0d7de));
+  --vt-border-muted: var(--borderColor-muted, var(--color-border-muted, #d8dee4));
+}
+
+#vtjmetrics-tab-link {
+  cursor: pointer;
+}
+
+#vtjmetrics-tab-link .vtjmetrics-tab-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vtjmetrics-tab-icon {
+  display: inline-block;
+  border-radius: 4px;
+}
+
+.vtjmetrics-panel {
+  margin: 16px 0 24px;
+  padding: 0 16px;
+}
+
+.vtjmetrics-card {
+  border: 1px solid var(--vt-border);
+  border-radius: 12px;
+  background: var(--vt-canvas);
+  color: var(--vt-fg);
+  padding: 18px;
+  max-width: 1100px;
+  box-shadow: 0 1px 2px rgba(27, 31, 36, 0.12);
+}
+
+.vtjmetrics-card h2 {
+  margin: 0 0 8px;
+  font-size: 22px;
+  color: var(--vt-fg);
+}
+
+.vtjmetrics-card h2 small {
+  color: var(--vt-muted);
+  font-size: 14px;
+}
+
+.vtjmetrics-card h3 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--vt-fg);
+}
+
+.vtjmetrics-card p {
+  margin: 8px 0;
+  color: var(--vt-fg);
+}
+
+.vtjmetrics-card label {
+  display: block;
+  margin: 12px 0 6px;
+  font-weight: 600;
+  color: var(--vt-fg);
+}
+
+.vtjmetrics-card input,
+.vtjmetrics-card select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--vt-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  color: var(--vt-fg);
+  background: var(--vt-inset);
+}
+
+.vtjmetrics-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.vtjmetrics-actions button,
+.vtjmetrics-viz-section button {
+  background: #2da44e;
+  border: 1px solid rgba(27, 31, 36, 0.15);
+  color: #ffffff;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.vtjmetrics-actions button[hidden] {
+  display: none;
+}
+
+.vtjmetrics-actions button[disabled],
+.vtjmetrics-viz-section button[disabled] {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+#vtjmetrics-download-btn {
+  background: #0969da;
+}
+
+#vtjmetrics-status[data-type="error"] {
+  color: #f85149;
+}
+
+#vtjmetrics-status[data-type="success"] {
+  color: #3fb950;
+}
+
+#vtjmetrics-status[data-type="info"] {
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-note {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-viz-section {
+  margin-top: 16px;
+  border: 1px solid var(--vt-border-muted);
+  border-radius: 10px;
+  background: var(--vt-canvas);
+  padding: 14px;
+}
+
+.vtjmetrics-viz-header {
+  margin-bottom: 12px;
+}
+
+.vtjmetrics-viz-header p {
+  font-size: 13px;
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-viz-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.vtjmetrics-control-block {
+  margin-bottom: 10px;
+}
+
+.vtjmetrics-precedence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.vtjmetrics-reset-hidden-btn {
+  background: #57606a !important;
+  font-size: 12px;
+  padding: 6px 10px !important;
+}
+
+.vtjmetrics-control-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vtjmetrics-control-inline select {
+  flex: 1;
+}
+
+.vtjmetrics-selected-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.vtjmetrics-selected-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--vt-border-muted);
+  border-radius: 8px;
+  background: var(--vt-subtle);
+}
+
+.vtjmetrics-selected-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.vtjmetrics-selected-index {
+  color: var(--vt-muted);
+  font-size: 12px;
+  width: 20px;
+}
+
+.vtjmetrics-selected-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.vtjmetrics-selected-label {
+  font-weight: 600;
+  color: var(--vt-fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtjmetrics-threshold-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.vtjmetrics-threshold-label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-threshold-input {
+  width: 90px !important;
+  min-width: 90px;
+  padding: 5px 8px !important;
+}
+
+.vtjmetrics-hidden-count {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-selected-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vtjmetrics-selected-actions button {
+  padding: 5px 8px;
+  background: #57606a;
+  font-size: 12px;
+}
+
+.vtjmetrics-selected-actions button[data-action="remove"] {
+  background: #cf222e;
+}
+
+.vtjmetrics-selected-empty {
+  padding: 8px 10px;
+  border: 1px dashed var(--vt-border);
+  border-radius: 8px;
+  color: var(--vt-muted);
+  font-size: 13px;
+  background: var(--vt-subtle);
+}
+
+.vtjmetrics-viz-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 10px;
+}
+
+.vtjmetrics-legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--vt-fg);
+  border: 1px solid var(--vt-border);
+  border-radius: 999px;
+  padding: 4px 9px;
+  background: var(--vt-subtle);
+}
+
+.vtjmetrics-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+}
+
+.vtjmetrics-legend-line {
+  width: 20px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.vtjmetrics-viz-warnings {
+  color: #9a6700;
+  font-size: 12px;
+  margin: 8px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #d4a72c;
+  background: #fff8c5;
+}
+
+.vtjmetrics-viz-empty {
+  color: var(--vt-muted);
+  font-size: 13px;
+  margin: 8px 0;
+}
+
+.vtjmetrics-viz-canvas {
+  width: 100%;
+  min-height: 300px;
+  border: 1px solid var(--vt-border-muted);
+  border-radius: 10px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(31, 111, 235, 0.09), transparent 44%),
+    radial-gradient(circle at 80% 10%, rgba(215, 58, 73, 0.08), transparent 36%),
+    #ffffff;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.vtjmetrics-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.vtjmetrics-node-label {
+  fill: #0f172a;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.vtjmetrics-link-out {
+  stroke: #d73a49;
+}
+
+.vtjmetrics-link-in {
+  stroke: #1f6feb;
+}
+
+.vtjmetrics-hint-inline {
+  font-size: 12px;
+  color: var(--vt-muted);
+}
+
+.vtjmetrics-viz-details {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--vt-border-muted);
+  border-radius: 8px;
+  background: var(--vt-subtle);
+  font-size: 13px;
+  color: var(--vt-fg);
+  min-height: 68px;
+}
+
+.vtjmetrics-context-menu {
+  position: fixed;
+  z-index: 2147483647;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 220px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--vt-border);
+  background: var(--vt-canvas);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.26);
+}
+
+.vtjmetrics-context-menu button {
+  width: 100%;
+  text-align: left;
+  background: var(--vt-subtle);
+  color: var(--vt-fg);
+  border: 1px solid var(--vt-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.vtjmetrics-context-menu button:hover {
+  border-color: var(--vt-border-muted);
+}
+
+@media (max-width: 720px) {
+  .vtjmetrics-panel {
+    padding: 0 10px;
+  }
+
+  .vtjmetrics-card {
+    padding: 14px;
+  }
+
+  .vtjmetrics-selected-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .vtjmetrics-threshold-inline {
+    margin-left: 0;
+    justify-content: space-between;
+  }
+
+  .vtjmetrics-selected-actions {
+    justify-content: flex-end;
+  }
+
+  .vtjmetrics-viz-canvas {
+    min-height: 260px;
+  }
+}

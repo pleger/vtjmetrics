@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VTJMetrics Extension Options</title>
+  <style>
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 24px;
+      color: #1f2328;
+    }
+    main {
+      max-width: 760px;
+    }
+    h1 {
+      margin-bottom: 8px;
+    }
+    .field {
+      margin-bottom: 14px;
+    }
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    input {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 9px 10px;
+      border: 1px solid #d0d7de;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    button {
+      background: #2da44e;
+      color: #ffffff;
+      border: 1px solid rgba(27, 31, 36, 0.15);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    #status {
+      margin-top: 10px;
+      color: #1a7f37;
+    }
+    .note {
+      color: #57606a;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>VTJMetrics Extension Options</h1>
+    <p class="note">VTJMetrics runs locally in your browser. For private repositories, add a GitHub token with read access (fine-grained token: <strong>Contents = Read</strong> and selected repository; classic token: <strong>repo</strong> scope).</p>
+
+    <div class="field">
+      <label for="github-token">GitHub Token (optional)</label>
+      <input id="github-token" type="password" placeholder="ghp_...">
+    </div>
+
+    <button id="save-btn" type="button">Save</button>
+    <p id="status"></p>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

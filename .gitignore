@@ -1,0 +1,7 @@
+.DS_Store
+node_modules/
+*.log
+
+# Optional local artifacts
+chrome-extension.crx
+chrome-extension.pem

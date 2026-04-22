@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VTJMetrics Docs - Home</title>
+  <link rel="stylesheet" href="./assets/docs.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <p class="brand">VTJMetrics Docs</p>
+      <p class="subtitle">Visualization Toolkit for JTMetrics</p>
+      <nav class="nav">
+        <a class="active" href="./index.html">Overview</a>
+        <a href="./getting-started.html">Getting Started</a>
+        <a href="./web-app.html">Web App</a>
+        <a href="./extension.html">Chrome Extension</a>
+        <a href="./architecture.html">Architecture</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <section class="card">
+          <h1>VTJMetrics</h1>
+          <p>VTJMetrics extends JTMetrics with interactive coupling visualization. It supports two runtimes:</p>
+          <ul>
+            <li>Chrome extension on GitHub repository pages.</li>
+            <li>Standalone web app (GitHub URL or ZIP source package).</li>
+          </ul>
+          <div class="notice">
+            Core metric execution is shared through <code>chrome-extension/browser-engine.js</code> and <code>chrome-extension/metric-src/*</code>.
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Main Capabilities</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Capability</th>
+                <th>Description</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>JSON export</td>
+                <td>Download complete JTMetrics output in JSON format.</td>
+              </tr>
+              <tr>
+                <td>Coupling visualization</td>
+                <td>Nested circles by precedence and split line encoding for fan-out/fan-in.</td>
+              </tr>
+              <tr>
+                <td>Threshold filtering</td>
+                <td>Filter nodes by minimum lines to reduce visual overload.</td>
+              </tr>
+              <tr>
+                <td>Interactive exploration</td>
+                <td>Hover details, drag nodes, and metric precedence controls.</td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

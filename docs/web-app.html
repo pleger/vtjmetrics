@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VTJMetrics Docs - Web App</title>
+  <link rel="stylesheet" href="./assets/docs.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <p class="brand">VTJMetrics Docs</p>
+      <p class="subtitle">Visualization Toolkit for JTMetrics</p>
+      <nav class="nav">
+        <a href="./index.html">Overview</a>
+        <a href="./getting-started.html">Getting Started</a>
+        <a class="active" href="./web-app.html">Web App</a>
+        <a href="./extension.html">Chrome Extension</a>
+        <a href="./architecture.html">Architecture</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="content">
+        <section class="card">
+          <h1>Web App</h1>
+          <p>The web app supports two source modes:</p>
+          <ul>
+            <li><strong>GitHub URL</strong>: repository URL + source path.</li>
+            <li><strong>ZIP upload</strong>: local compressed source bundle.</li>
+          </ul>
+
+          <h2>Input Requirements</h2>
+          <ul>
+            <li>Supported code files: <code>.js</code>, <code>.cjs</code>, <code>.ts</code> (analysis)</li>
+            <li>Import resolution set also includes <code>.jsx</code>, <code>.tsx</code>, <code>.json</code></li>
+            <li>Source path can be <code>.</code> or any subdirectory (e.g., <code>src</code>)</li>
+          </ul>
+
+          <h2>Visualization Encoding</h2>
+          <ul>
+            <li>Fan-out segment color: red</li>
+            <li>Fan-in segment color: blue</li>
+            <li>Segment thickness follows ratio over <code>N = fanIn + fanOut</code> for each source node.</li>
+          </ul>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

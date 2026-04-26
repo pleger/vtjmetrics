@@ -790,7 +790,9 @@
 
   function getSvgSize (container) {
     const width = Math.max(760, Math.min(1320, Math.floor(container.clientWidth || 900)))
-    const height = Math.max(520, Math.floor(width * 0.62))
+    const aspect = state.graphMode === GRAPH_MODE_RADIAL_FOCUS ? 0.78 : 0.62
+    const minHeight = state.graphMode === GRAPH_MODE_RADIAL_FOCUS ? 620 : 520
+    const height = Math.max(minHeight, Math.floor(width * aspect))
     return { width, height }
   }
 
@@ -855,44 +857,171 @@
         node.y += 8
       })
     } else {
+      function normalizeAngle (angle) {
+        const twoPi = Math.PI * 2
+        let value = angle % twoPi
+        if (value < 0) value += twoPi
+        return value
+      }
+
+      function getMetricRingRadiusRange (ringIndex) {
+        const outerMax = 48
+        const innerMax = 26
+        const blend = Math.max(0, Math.min(1, (ringIndex - 1) / Math.max(1, selectedIds.length - 1 || 1)))
+        const max = outerMax + ((innerMax - outerMax) * blend)
+        return { min: 8, max }
+      }
+
+      function getMetricValue (node) {
+        return toNonNegativeInt(node.data.meta?.value, 1)
+      }
+
+      function applyRingSimulation (nodesAtRing, ringRadius, centerX, centerY) {
+        if (!nodesAtRing || nodesAtRing.length === 0) return
+
+        const simulation = d3.forceSimulation(nodesAtRing)
+          .force('radial', d3.forceRadial(ringRadius, centerX, centerY).strength(0.95))
+          .force('x', d3.forceX(node => centerX + (Math.cos(node.__targetAngle) * ringRadius)).strength(0.22))
+          .force('y', d3.forceY(node => centerY + (Math.sin(node.__targetAngle) * ringRadius)).strength(0.22))
+          .force('collide', d3.forceCollide().radius(node => node.r + 5).iterations(2))
+          .alpha(1)
+          .alphaDecay(0.04)
+          .stop()
+
+        for (let tick = 0; tick < 180; tick++) simulation.tick()
+      }
+
       const descendants = root.descendants()
       const circlesOnly = descendants.filter(node => node.data.key !== 'root')
-      const maxDepth = Math.max(1, ...circlesOnly.map(node => node.depth))
+      const ringIndexByMetricId = new Map(selectedIds.map((metricId, idx) => [metricId, idx + 1]))
+      const maxRing = Math.max(1, ...circlesOnly.map(node => ringIndexByMetricId.get(node.data.metricId) || node.depth || 1))
       const centerX = width / 2
       const centerY = height / 2
-      const ringStep = (Math.min(width, height) * 0.38) / maxDepth
-      const maxValue = Math.max(1, ...circlesOnly.map(node => toNonNegativeInt(node.data.meta?.value, 1)))
-      const radiusScale = d3.scaleSqrt().domain([1, maxValue]).range([8, Math.max(16, ringStep * 0.42)])
       const depthBuckets = new Map()
 
       for (const node of circlesOnly) {
-        const depth = node.depth
-        if (!depthBuckets.has(depth)) depthBuckets.set(depth, [])
-        depthBuckets.get(depth).push(node)
+        const ringIndex = ringIndexByMetricId.get(node.data.metricId) || node.depth || 1
+        node.__ringIndex = ringIndex
+        if (!depthBuckets.has(ringIndex)) depthBuckets.set(ringIndex, [])
+        depthBuckets.get(ringIndex).push(node)
       }
 
-      for (const [depth, nodesAtDepth] of depthBuckets.entries()) {
-        const n = Math.max(1, nodesAtDepth.length)
-        const ringRadius = depth * ringStep
-        const angleOffset = depth * 0.34
+      const maxValueByRing = new Map()
+      for (const node of circlesOnly) {
+        const value = getMetricValue(node)
+        maxValueByRing.set(node.__ringIndex, Math.max(maxValueByRing.get(node.__ringIndex) || 1, value))
+      }
 
-        nodesAtDepth.forEach((node, index) => {
-          const angle = angleOffset + ((Math.PI * 2) * (index / n))
-          const value = toNonNegativeInt(node.data.meta?.value, 1)
-          const depthFactor = depth <= 1 ? 1.05 : Math.max(0.58, 1 - ((depth - 1) * 0.08))
-          node.r = Math.max(6, radiusScale(value) * depthFactor)
-          node.x = centerX + (Math.cos(angle) * ringRadius)
-          node.y = centerY + (Math.sin(angle) * ringRadius)
+      const ringSorted = Array.from(depthBuckets.entries()).sort((a, b) => a[0] - b[0])
+      const ringModel = []
+
+      for (const [ringIndex, nodesAtDepth] of ringSorted) {
+        const maxValueThisRing = Math.max(1, maxValueByRing.get(ringIndex) || 1)
+        const radiusRange = getMetricRingRadiusRange(ringIndex)
+        const ringRadiusScale = d3.scaleSqrt()
+          .domain([1, maxValueThisRing])
+          .range([radiusRange.min, radiusRange.max])
+
+        nodesAtDepth.forEach((node) => {
+          const value = getMetricValue(node)
+          node.r = Math.max(6, ringRadiusScale(value))
+        })
+
+        const ringArcNeed = nodesAtDepth.reduce((acc, node) => acc + (2 * node.r) + 12, 0) / (Math.PI * 2)
+        const ringMaxNodeRadius = Math.max(6, ...nodesAtDepth.map(node => node.r))
+        ringModel.push({
+          ringIndex,
+          nodesAtDepth,
+          ringArcNeed,
+          ringMaxNodeRadius,
+          ringRadius: 0
+        })
+      }
+
+      let prevRadius = 0
+      let prevMaxNodeRadius = 0
+      for (const ring of ringModel) {
+        const minFromArc = ring.ringArcNeed + 16
+        const minFromPrev = prevRadius === 0
+          ? ring.ringMaxNodeRadius + 70
+          : prevRadius + prevMaxNodeRadius + ring.ringMaxNodeRadius + 46
+        ring.ringRadius = Math.max(minFromArc, minFromPrev)
+        prevRadius = ring.ringRadius
+        prevMaxNodeRadius = ring.ringMaxNodeRadius
+      }
+
+      const maxAllowedOuterRadius = Math.min(width, height) * 0.465
+      const requiredOuterRadius = ringModel.length > 0
+        ? ringModel[ringModel.length - 1].ringRadius + ringModel[ringModel.length - 1].ringMaxNodeRadius + 8
+        : 1
+      if (requiredOuterRadius > maxAllowedOuterRadius) {
+        const ratio = maxAllowedOuterRadius / requiredOuterRadius
+        for (const ring of ringModel) {
+          ring.ringRadius *= ratio
+          ring.ringMaxNodeRadius *= ratio
+          ring.nodesAtDepth.forEach(node => { node.r = Math.max(4.8, node.r * ratio) })
+        }
+      }
+
+      for (const ring of ringModel) {
+        const { ringIndex, nodesAtDepth, ringRadius } = ring
+
+        if (ringIndex === 1) {
+          const sorted = [...nodesAtDepth].sort((a, b) => {
+            const va = getMetricValue(a)
+            const vb = getMetricValue(b)
+            return vb - va
+          })
+          const angleOffset = -Math.PI / 2
+          const golden = Math.PI * (3 - Math.sqrt(5))
+          sorted.forEach((node, index) => {
+            node.__targetAngle = normalizeAngle(angleOffset + (golden * index))
+            node.__angle = node.__targetAngle
+          })
+        } else {
+          const byParent = new Map()
+          for (const node of nodesAtDepth) {
+            const parentKey = node.parent?.data?.key || 'root'
+            if (!byParent.has(parentKey)) byParent.set(parentKey, [])
+            byParent.get(parentKey).push(node)
+          }
+
+          for (const siblings of byParent.values()) {
+            const parentAngle = siblings[0].parent?.__angle ?? 0
+            const siblingCount = siblings.length
+            const spread = siblingCount <= 1
+              ? 0
+              : Math.min(Math.PI * 0.9, 0.28 + (0.17 * siblingCount))
+            const step = siblingCount <= 1 ? 0 : (spread / (siblingCount - 1))
+            const start = parentAngle - (spread / 2)
+
+            siblings
+              .sort((a, b) => getMetricValue(b) - getMetricValue(a))
+              .forEach((node, idx) => {
+                node.__targetAngle = normalizeAngle(start + (step * idx))
+                node.__angle = node.__targetAngle
+              })
+          }
+        }
+
+        applyRingSimulation(nodesAtDepth, ringRadius, centerX, centerY)
+
+        nodesAtDepth.forEach((node) => {
+          const dx = node.x - centerX
+          const dy = node.y - centerY
+          node.__angle = normalizeAngle(Math.atan2(dy, dx))
         })
       }
 
       root.x = centerX
       root.y = centerY
-      root.r = Math.max(14, ringStep * 0.55)
+      root.r = 20
 
       const guides = svg.append('g').attr('class', 'vtj-radial-guides')
-      for (let depth = 1; depth <= maxDepth; depth++) {
-        const ringRadius = depth * ringStep
+      for (let depth = 1; depth <= maxRing; depth++) {
+        const ringInfo = ringModel.find(item => item.ringIndex === depth)
+        if (!ringInfo) continue
+        const ringRadius = ringInfo.ringRadius
         const metricLabel = getMetricLabel(selectedIds[depth - 1] || '')
 
         guides.append('circle')
@@ -900,18 +1029,19 @@
           .attr('cy', centerY)
           .attr('r', ringRadius)
           .attr('fill', 'none')
-          .attr('stroke', '#c5d3e6')
+          .attr('stroke', '#c7d6ea')
           .attr('stroke-width', 1)
-          .attr('stroke-dasharray', '4 6')
-          .attr('opacity', 0.55)
+          .attr('stroke-dasharray', depth === 1 ? '3 5' : '4 6')
+          .attr('opacity', 0.5)
 
         if (metricLabel) {
           guides.append('text')
             .attr('x', centerX)
-            .attr('y', centerY - ringRadius - 6)
+            .attr('y', centerY - ringRadius - 8)
             .attr('text-anchor', 'middle')
-            .attr('font-size', 11)
-            .attr('fill', '#4b5563')
+            .attr('font-size', depth === 1 ? 11 : 12)
+            .attr('font-weight', depth === 1 ? 600 : 700)
+            .attr('fill', '#445569')
             .text(metricLabel)
         }
       }
@@ -978,18 +1108,20 @@
     const linksGroup = svg.append('g').attr('class', 'vtjmetrics-links')
     const linkSelection = linksGroup.selectAll('g').data(proportionalLinks).enter().append('g')
 
-    const fanOutSelection = linkSelection.append('line')
+    const fanOutSelection = linkSelection.append('path')
       .attr('stroke', FAN_OUT_COLOR)
       .attr('stroke-width', d => d.outWidth)
       .attr('marker-end', `url(#${outArrowId})`)
+      .attr('fill', 'none')
       .attr('stroke-linecap', 'round')
       .attr('stroke-opacity', 0.9)
       .style('display', d => d.outFlow > 0 ? null : 'none')
 
-    const fanInSelection = linkSelection.append('line')
+    const fanInSelection = linkSelection.append('path')
       .attr('stroke', FAN_IN_COLOR)
       .attr('stroke-width', d => d.inWidth)
       .attr('marker-end', `url(#${inArrowId})`)
+      .attr('fill', 'none')
       .attr('stroke-linecap', 'round')
       .attr('stroke-opacity', 0.9)
       .style('display', d => d.inFlow > 0 ? null : 'none')
@@ -1056,16 +1188,28 @@
 
     function updateLinkGeometry () {
       fanOutSelection
-        .attr('x1', d => getSegmentPoints(d).sx)
-        .attr('y1', d => getSegmentPoints(d).sy)
-        .attr('x2', d => getSegmentPoints(d).mx)
-        .attr('y2', d => getSegmentPoints(d).my)
+        .attr('d', d => {
+          const points = getSegmentPoints(d)
+          if (!isRadialFocusMode) return `M${points.sx},${points.sy}L${points.mx},${points.my}`
+          const cx = width / 2
+          const cy = height / 2
+          const pull = 0.32
+          const controlX = (points.mx * (1 - pull)) + (cx * pull)
+          const controlY = (points.my * (1 - pull)) + (cy * pull)
+          return `M${points.sx},${points.sy}Q${controlX},${controlY} ${points.mx},${points.my}`
+        })
 
       fanInSelection
-        .attr('x1', d => getSegmentPoints(d).mx)
-        .attr('y1', d => getSegmentPoints(d).my)
-        .attr('x2', d => getSegmentPoints(d).tx)
-        .attr('y2', d => getSegmentPoints(d).ty)
+        .attr('d', d => {
+          const points = getSegmentPoints(d)
+          if (!isRadialFocusMode) return `M${points.mx},${points.my}L${points.tx},${points.ty}`
+          const cx = width / 2
+          const cy = height / 2
+          const pull = 0.3
+          const controlX = (points.mx * (1 - pull)) + (cx * pull)
+          const controlY = (points.my * (1 - pull)) + (cy * pull)
+          return `M${points.mx},${points.my}Q${controlX},${controlY} ${points.tx},${points.ty}`
+        })
     }
 
     updateLinkGeometry()

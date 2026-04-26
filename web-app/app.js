@@ -9,11 +9,11 @@
 
   const COUPLING_METRICS = [
     { id: 'file-coupling', label: 'File Coupling', level: 'file' },
-    { id: 'package-coupling', label: 'Package Coupling', level: 'package' },
-    { id: 'cyclic-coupling', label: 'Cyclic Coupling', level: 'file' },
-    { id: 'temporal-coupling', label: 'Temporal Coupling', level: 'file' },
     { id: 'class-coupling', label: 'Class Coupling', level: 'class' },
-    { id: 'function-coupling', label: 'Function Coupling', level: 'function' }
+    { id: 'function-coupling', label: 'Function Coupling', level: 'function' },
+    { id: 'package-coupling', label: 'Package Coupling', level: 'package' },
+    { id: 'temporal-coupling', label: 'Temporal Coupling', level: 'file' },
+    { id: 'cyclic-coupling', label: 'Cyclic Coupling', level: 'file' }
   ]
 
   const METRIC_COLOR_BY_ID = {
@@ -892,7 +892,38 @@
       }
 
       const descendants = root.descendants()
-      const circlesOnly = descendants.filter(node => node.data.key !== 'root')
+      const allCircles = descendants.filter(node => node.data.key !== 'root')
+      let circlesOnly = allCircles
+
+      if (selectedIds.length > 1) {
+        const linkedKeys = new Set()
+        for (const link of model.links) {
+          linkedKeys.add(link.sourceKey)
+          linkedKeys.add(link.targetKey)
+        }
+
+        if (linkedKeys.size > 0) {
+          const keepMemo = new Map()
+          function shouldKeep (node) {
+            if (node.data.key === 'root') return true
+            if (keepMemo.has(node.data.key)) return keepMemo.get(node.data.key)
+
+            let keep = linkedKeys.has(node.data.key)
+            if (!keep && Array.isArray(node.children) && node.children.length > 0) {
+              keep = node.children.some(shouldKeep)
+            }
+
+            keepMemo.set(node.data.key, keep)
+            return keep
+          }
+
+          circlesOnly = allCircles.filter(shouldKeep)
+          const keepSet = new Set(circlesOnly.map(node => node.data.key))
+          for (const node of allCircles) {
+            node.__skip = !keepSet.has(node.data.key)
+          }
+        }
+      }
       const ringIndexByMetricId = new Map(selectedIds.map((metricId, idx) => [metricId, idx + 1]))
       const maxRing = Math.max(1, ...circlesOnly.map(node => ringIndexByMetricId.get(node.data.metricId) || node.depth || 1))
       const centerX = width / 2
@@ -1048,7 +1079,7 @@
     }
 
     const nodeByKey = new Map()
-    const circles = root.descendants().filter(node => node.data.key !== 'root')
+    const circles = root.descendants().filter(node => node.data.key !== 'root' && !node.__skip)
 
     for (const node of circles) nodeByKey.set(node.data.key, node)
 
@@ -1249,7 +1280,8 @@
       .attr('dy', '0.35em')
       .attr('font-size', d => Math.max(9, Math.min(15, d.r * 0.23)))
       .text(d => {
-        if (d.r < 18) return ''
+        const minLabelRadius = isRadialFocusMode ? 22 : 18
+        if (d.r < minLabelRadius) return ''
         return truncateMiddle(d.data.label || '', d.r > 52 ? 28 : 14)
       })
 
@@ -1259,7 +1291,7 @@
           .attr('opacity', 1)
           .attr('stroke-width', d => Math.max(1.2, Math.min(3.2, d.r * 0.06)))
         nodeSelection.select('text').attr('opacity', 1)
-        const baseOpacity = isRadialFocusMode ? 0.54 : 0.9
+        const baseOpacity = isRadialFocusMode ? 0.3 : 0.9
         fanOutSelection.attr('stroke-opacity', baseOpacity)
         fanInSelection.attr('stroke-opacity', baseOpacity)
         return

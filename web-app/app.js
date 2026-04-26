@@ -1070,7 +1070,9 @@
     })
 
     const maxEdgeWeight = Math.max(1, ...proportionalLinks.map(link => link.edgeWeight || 1))
-    const widthScale = d3.scaleSqrt().domain([1, maxEdgeWeight]).range([2.8, 12])
+    const widthScale = d3.scaleSqrt()
+      .domain([1, maxEdgeWeight])
+      .range(isRadialFocusMode ? [2.1, 8.4] : [2.8, 12])
 
     for (const link of proportionalLinks) {
       const totalStroke = widthScale(link.edgeWeight || 1)
@@ -1089,17 +1091,17 @@
     function appendArrowMarker (id, color) {
       defs.append('marker')
         .attr('id', id)
-        .attr('viewBox', '0 -4 8 8')
-        .attr('refX', 5.4)
+        .attr('viewBox', '0 -3 6 6')
+        .attr('refX', 4.2)
         .attr('refY', 0)
         .attr('markerUnits', 'userSpaceOnUse')
-        .attr('markerWidth', 3.8)
-        .attr('markerHeight', 3.8)
+        .attr('markerWidth', 2.9)
+        .attr('markerHeight', 2.9)
         .attr('orient', 'auto')
         .append('path')
-        .attr('d', 'M0,-2.4L4.6,0L0,2.4')
+        .attr('d', 'M0,-1.8L3.8,0L0,1.8')
         .attr('fill', color)
-        .attr('opacity', 0.9)
+        .attr('opacity', 0.88)
     }
 
     appendArrowMarker(outArrowId, FAN_OUT_COLOR)
@@ -1114,7 +1116,7 @@
       .attr('marker-end', `url(#${outArrowId})`)
       .attr('fill', 'none')
       .attr('stroke-linecap', 'round')
-      .attr('stroke-opacity', 0.9)
+      .attr('stroke-opacity', isRadialFocusMode ? 0.82 : 0.9)
       .style('display', d => d.outFlow > 0 ? null : 'none')
 
     const fanInSelection = linkSelection.append('path')
@@ -1123,7 +1125,7 @@
       .attr('marker-end', `url(#${inArrowId})`)
       .attr('fill', 'none')
       .attr('stroke-linecap', 'round')
-      .attr('stroke-opacity', 0.9)
+      .attr('stroke-opacity', isRadialFocusMode ? 0.82 : 0.9)
       .style('display', d => d.inFlow > 0 ? null : 'none')
 
     let applyFocusByNodeKey = () => {}
@@ -1173,42 +1175,38 @@
       const sy = source.y + uy * sourcePad
       const tx = sx + ux * visibleDistance
       const ty = sy + uy * visibleDistance
-      let mx = (sx + tx) / 2
-      let my = (sy + ty) / 2
-      if (isRadialFocusMode) {
-        const centerPull = 0.24
-        const cx = width / 2
-        const cy = height / 2
-        mx = (mx * (1 - centerPull)) + (cx * centerPull)
-        my = (my * (1 - centerPull)) + (cy * centerPull)
-      }
-
+      const splitRatio = 0.5
+      const mx = sx + ((tx - sx) * splitRatio)
+      const my = sy + ((ty - sy) * splitRatio)
       return { sx, sy, mx, my, tx, ty }
+    }
+
+    function buildPath (x1, y1, x2, y2, pull) {
+      if (!isRadialFocusMode) return `M${x1},${y1}L${x2},${y2}`
+      const cx = width / 2
+      const cy = height / 2
+      const mx = (x1 + x2) / 2
+      const my = (y1 + y2) / 2
+      const bendX = (mx * (1 - pull)) + (cx * pull)
+      const bendY = (my * (1 - pull)) + (cy * pull)
+      const c1x = (x1 + bendX) / 2
+      const c1y = (y1 + bendY) / 2
+      const c2x = (x2 + bendX) / 2
+      const c2y = (y2 + bendY) / 2
+      return `M${x1},${y1}C${c1x},${c1y} ${c2x},${c2y} ${x2},${y2}`
     }
 
     function updateLinkGeometry () {
       fanOutSelection
         .attr('d', d => {
           const points = getSegmentPoints(d)
-          if (!isRadialFocusMode) return `M${points.sx},${points.sy}L${points.mx},${points.my}`
-          const cx = width / 2
-          const cy = height / 2
-          const pull = 0.32
-          const controlX = (points.mx * (1 - pull)) + (cx * pull)
-          const controlY = (points.my * (1 - pull)) + (cy * pull)
-          return `M${points.sx},${points.sy}Q${controlX},${controlY} ${points.mx},${points.my}`
+          return buildPath(points.sx, points.sy, points.mx, points.my, 0.16)
         })
 
       fanInSelection
         .attr('d', d => {
           const points = getSegmentPoints(d)
-          if (!isRadialFocusMode) return `M${points.mx},${points.my}L${points.tx},${points.ty}`
-          const cx = width / 2
-          const cy = height / 2
-          const pull = 0.3
-          const controlX = (points.mx * (1 - pull)) + (cx * pull)
-          const controlY = (points.my * (1 - pull)) + (cy * pull)
-          return `M${points.mx},${points.my}Q${controlX},${controlY} ${points.tx},${points.ty}`
+          return buildPath(points.mx, points.my, points.tx, points.ty, 0.12)
         })
     }
 
@@ -1261,8 +1259,9 @@
           .attr('opacity', 1)
           .attr('stroke-width', d => Math.max(1.2, Math.min(3.2, d.r * 0.06)))
         nodeSelection.select('text').attr('opacity', 1)
-        fanOutSelection.attr('stroke-opacity', 0.9)
-        fanInSelection.attr('stroke-opacity', 0.9)
+        const baseOpacity = isRadialFocusMode ? 0.54 : 0.9
+        fanOutSelection.attr('stroke-opacity', baseOpacity)
+        fanInSelection.attr('stroke-opacity', baseOpacity)
         return
       }
 

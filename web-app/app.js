@@ -1,6 +1,8 @@
 (function () {
   const EDGE_MODE_ALL = 'all'
   const EDGE_MODE_LAST = 'last'
+  const GRAPH_MODE_PACK = 'pack'
+  const GRAPH_MODE_RADIAL_FOCUS = 'radial-focus'
 
   const FAN_OUT_COLOR = '#d73a49'
   const FAN_IN_COLOR = '#1f6feb'
@@ -30,6 +32,7 @@
     selectedMetricIds: [],
     hiddenNodeKeys: [],
     edgeMode: EDGE_MODE_ALL,
+    graphMode: GRAPH_MODE_PACK,
     lineThresholdByMetricId: {
       'package-coupling': 0,
       'file-coupling': 0,
@@ -840,15 +843,79 @@
       .attr('viewBox', `0 0 ${width} ${height}`)
 
     const root = d3.hierarchy(model.hierarchy).sum(d => Math.max(1, d.value || 1))
+    const isRadialFocusMode = state.graphMode === GRAPH_MODE_RADIAL_FOCUS
 
-    d3.pack()
-      .size([width - 16, height - 16])
-      .padding(12)(root)
+    if (!isRadialFocusMode) {
+      d3.pack()
+        .size([width - 16, height - 16])
+        .padding(12)(root)
 
-    root.each(node => {
-      node.x += 8
-      node.y += 8
-    })
+      root.each(node => {
+        node.x += 8
+        node.y += 8
+      })
+    } else {
+      const descendants = root.descendants()
+      const circlesOnly = descendants.filter(node => node.data.key !== 'root')
+      const maxDepth = Math.max(1, ...circlesOnly.map(node => node.depth))
+      const centerX = width / 2
+      const centerY = height / 2
+      const ringStep = (Math.min(width, height) * 0.38) / maxDepth
+      const maxValue = Math.max(1, ...circlesOnly.map(node => toNonNegativeInt(node.data.meta?.value, 1)))
+      const radiusScale = d3.scaleSqrt().domain([1, maxValue]).range([8, Math.max(16, ringStep * 0.42)])
+      const depthBuckets = new Map()
+
+      for (const node of circlesOnly) {
+        const depth = node.depth
+        if (!depthBuckets.has(depth)) depthBuckets.set(depth, [])
+        depthBuckets.get(depth).push(node)
+      }
+
+      for (const [depth, nodesAtDepth] of depthBuckets.entries()) {
+        const n = Math.max(1, nodesAtDepth.length)
+        const ringRadius = depth * ringStep
+        const angleOffset = depth * 0.34
+
+        nodesAtDepth.forEach((node, index) => {
+          const angle = angleOffset + ((Math.PI * 2) * (index / n))
+          const value = toNonNegativeInt(node.data.meta?.value, 1)
+          const depthFactor = depth <= 1 ? 1.05 : Math.max(0.58, 1 - ((depth - 1) * 0.08))
+          node.r = Math.max(6, radiusScale(value) * depthFactor)
+          node.x = centerX + (Math.cos(angle) * ringRadius)
+          node.y = centerY + (Math.sin(angle) * ringRadius)
+        })
+      }
+
+      root.x = centerX
+      root.y = centerY
+      root.r = Math.max(14, ringStep * 0.55)
+
+      const guides = svg.append('g').attr('class', 'vtj-radial-guides')
+      for (let depth = 1; depth <= maxDepth; depth++) {
+        const ringRadius = depth * ringStep
+        const metricLabel = getMetricLabel(selectedIds[depth - 1] || '')
+
+        guides.append('circle')
+          .attr('cx', centerX)
+          .attr('cy', centerY)
+          .attr('r', ringRadius)
+          .attr('fill', 'none')
+          .attr('stroke', '#c5d3e6')
+          .attr('stroke-width', 1)
+          .attr('stroke-dasharray', '4 6')
+          .attr('opacity', 0.55)
+
+        if (metricLabel) {
+          guides.append('text')
+            .attr('x', centerX)
+            .attr('y', centerY - ringRadius - 6)
+            .attr('text-anchor', 'middle')
+            .attr('font-size', 11)
+            .attr('fill', '#4b5563')
+            .text(metricLabel)
+        }
+      }
+    }
 
     const nodeByKey = new Map()
     const circles = root.descendants().filter(node => node.data.key !== 'root')
@@ -927,6 +994,8 @@
       .attr('stroke-opacity', 0.9)
       .style('display', d => d.inFlow > 0 ? null : 'none')
 
+    let applyFocusByNodeKey = () => {}
+
     function formatPercent (value) {
       return `${(value * 100).toFixed(1)}%`
     }
@@ -936,6 +1005,7 @@
         event.preventDefault()
         event.stopPropagation()
         closeContextMenu()
+        applyFocusByNodeKey(null)
 
         fanOutSelection.attr('stroke-opacity', link => link === d ? 0.96 : 0.2)
         fanInSelection.attr('stroke-opacity', link => link === d ? 0.96 : 0.2)
@@ -971,8 +1041,15 @@
       const sy = source.y + uy * sourcePad
       const tx = sx + ux * visibleDistance
       const ty = sy + uy * visibleDistance
-      const mx = (sx + tx) / 2
-      const my = (sy + ty) / 2
+      let mx = (sx + tx) / 2
+      let my = (sy + ty) / 2
+      if (isRadialFocusMode) {
+        const centerPull = 0.24
+        const cx = width / 2
+        const cy = height / 2
+        mx = (mx * (1 - centerPull)) + (cx * centerPull)
+        my = (my * (1 - centerPull)) + (cy * centerPull)
+      }
 
       return { sx, sy, mx, my, tx, ty }
     }
@@ -1034,6 +1111,52 @@
         return truncateMiddle(d.data.label || '', d.r > 52 ? 28 : 14)
       })
 
+    applyFocusByNodeKey = (focusKey) => {
+      if (!focusKey) {
+        nodeSelection.select('circle')
+          .attr('opacity', 1)
+          .attr('stroke-width', d => Math.max(1.2, Math.min(3.2, d.r * 0.06)))
+        nodeSelection.select('text').attr('opacity', 1)
+        fanOutSelection.attr('stroke-opacity', 0.9)
+        fanInSelection.attr('stroke-opacity', 0.9)
+        return
+      }
+
+      const connectedKeys = new Set([focusKey])
+      for (const link of proportionalLinks) {
+        if (link.sourceKey === focusKey || link.targetKey === focusKey) {
+          connectedKeys.add(link.sourceKey)
+          connectedKeys.add(link.targetKey)
+        }
+      }
+
+      nodeSelection.select('circle')
+        .attr('opacity', node => connectedKeys.has(node.data.key) ? 1 : 0.2)
+        .attr('stroke-width', node => {
+          const base = Math.max(1.2, Math.min(3.2, node.r * 0.06))
+          return node.data.key === focusKey ? base + 2.2 : base
+        })
+
+      nodeSelection.select('text')
+        .attr('opacity', node => connectedKeys.has(node.data.key) ? 1 : 0.35)
+
+      fanOutSelection
+        .attr('stroke-opacity', link => {
+          if (link.outFlow <= 0) return 0
+          if (link.sourceKey === focusKey) return 0.96
+          if (link.targetKey === focusKey) return 0.56
+          return connectedKeys.has(link.sourceKey) || connectedKeys.has(link.targetKey) ? 0.24 : 0.08
+        })
+
+      fanInSelection
+        .attr('stroke-opacity', link => {
+          if (link.inFlow <= 0) return 0
+          if (link.targetKey === focusKey) return 0.96
+          if (link.sourceKey === focusKey) return 0.56
+          return connectedKeys.has(link.sourceKey) || connectedKeys.has(link.targetKey) ? 0.24 : 0.08
+        })
+    }
+
     let dragMoved = false
     const dragBehavior = d3.drag()
       .on('start', function (_event, d) {
@@ -1048,7 +1171,7 @@
           const margin = 6
           const parent = node.parent
 
-          if (parent && parent.data?.key !== 'root') {
+          if (!isRadialFocusMode && parent && parent.data?.key !== 'root') {
             const maxDist = Math.max(0, parent.r - node.r - margin)
             const dx = x - parent.x
             const dy = y - parent.y
@@ -1093,8 +1216,11 @@
         event.preventDefault()
         event.stopPropagation()
 
-        fanOutSelection.attr('stroke-opacity', 0.9)
-        fanInSelection.attr('stroke-opacity', 0.9)
+        if (isRadialFocusMode) {
+          applyFocusByNodeKey(d.data.key)
+        } else {
+          applyFocusByNodeKey(null)
+        }
 
         const metricLabel = getMetricLabel(d.data.metricId)
         const nodeMeta = d.data.meta || {}
@@ -1120,8 +1246,7 @@
 
     svg.on('click', () => {
       closeContextMenu()
-      fanOutSelection.attr('stroke-opacity', 0.9)
-      fanInSelection.attr('stroke-opacity', 0.9)
+      applyFocusByNodeKey(null)
       updateDetails(DEFAULT_DETAILS_HTML)
     })
   }
@@ -1206,6 +1331,7 @@
     renderMetricSelectOptions()
     renderSelectedMetricList()
     byId('edge-mode').value = state.edgeMode
+    byId('graph-mode').value = state.graphMode
   }
 
   function moveMetric (fromIndex, toIndex) {
@@ -1366,6 +1492,13 @@
 
     byId('edge-mode').addEventListener('change', (event) => {
       state.edgeMode = event.target.value === EDGE_MODE_LAST ? EDGE_MODE_LAST : EDGE_MODE_ALL
+      renderVisualization()
+    })
+
+    byId('graph-mode').addEventListener('change', (event) => {
+      state.graphMode = event.target.value === GRAPH_MODE_RADIAL_FOCUS
+        ? GRAPH_MODE_RADIAL_FOCUS
+        : GRAPH_MODE_PACK
       renderVisualization()
     })
 

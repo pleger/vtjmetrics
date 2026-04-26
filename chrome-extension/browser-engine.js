@@ -4,6 +4,7 @@
 
   const METRIC_FILES = {
     files: 'files.metric.js',
+    'package-coupling': 'packageCoupling.metric.js',
     'lines-per-file': 'linesPerFile.metric.js',
     'functions-per-file': 'functionsPerFile.metric.js',
     'function-length': 'functionLength.metric.js',
@@ -14,6 +15,8 @@
     'class-coupling': 'classCoupling.metric.js',
     'class-dependency-summary': 'classDependencySummary.metric.js',
     'file-coupling': 'fileCoupling.metric.js',
+    'cyclic-coupling': 'cyclicCoupling.metric.js',
+    'temporal-coupling': 'temporalCoupling.metric.js',
     'import-instability': 'importInstability.metric.js',
     'dependency-centrality': 'dependencyCentrality.metric.js',
     'instance-mapper': 'instanceMapper.metric.js'
@@ -30,13 +33,17 @@
   const CACHE_LIMITS = {
     defaultBranch: 128,
     tree: 128,
-    blob: 1024
+    blob: 1024,
+    commitList: 128,
+    commitDetail: 1024
   }
 
   const requestCache = {
     defaultBranch: new Map(),
     tree: new Map(),
-    blob: new Map()
+    blob: new Map(),
+    commitList: new Map(),
+    commitDetail: new Map()
   }
 
   function getCachedValue (cacheMap, key) {
@@ -242,8 +249,108 @@
     return blobContent
   }
 
+  async function fetchCommitList (owner, repo, ref, githubToken, perPage, page) {
+    const cacheKey = `${owner}/${repo}@${ref}:perPage=${perPage}:page=${page}`
+    const cached = getCachedValue(requestCache.commitList, cacheKey)
+    if (cached) return cached
+
+    const data = await fetchJson(
+      `https://api.github.com/repos/${owner}/${repo}/commits?sha=${encodeURIComponent(ref)}&per_page=${perPage}&page=${page}`,
+      githubToken
+    )
+
+    setCachedValue(requestCache.commitList, cacheKey, data, CACHE_LIMITS.commitList)
+    return data
+  }
+
+  async function fetchCommitDetail (owner, repo, sha, githubToken) {
+    const cacheKey = `${owner}/${repo}@${sha}`
+    const cached = getCachedValue(requestCache.commitDetail, cacheKey)
+    if (cached) return cached
+
+    const data = await fetchJson(
+      `https://api.github.com/repos/${owner}/${repo}/commits/${encodeURIComponent(sha)}`,
+      githubToken
+    )
+
+    setCachedValue(requestCache.commitDetail, cacheKey, data, CACHE_LIMITS.commitDetail)
+    return data
+  }
+
   function buildPseudoPath (pseudoRoot, repoPath) {
     return joinPath(pseudoRoot, repoPath)
+  }
+
+  function getRepoPathFromPseudo (pseudoPath, pseudoRoot) {
+    const normalizedPseudo = normalizePath(pseudoPath)
+    const normalizedRoot = normalizePath(pseudoRoot)
+    if (normalizedPseudo.startsWith(`${normalizedRoot}/`)) {
+      return normalizedPseudo.slice(normalizedRoot.length + 1)
+    }
+    return normalizedPseudo.replace(/^\/+/, '')
+  }
+
+  function getPackageIdFromPseudo (pseudoPath, pseudoRoot) {
+    const repoPath = getRepoPathFromPseudo(pseudoPath, pseudoRoot)
+    const dir = dirname(`/${repoPath}`).replace(/^\/+/, '')
+    return dir || '.'
+  }
+
+  function roundTo4 (value) {
+    return Number(Number(value || 0).toFixed(4))
+  }
+
+  async function fetchTemporalCommitFileSets ({
+    owner,
+    repo,
+    ref,
+    githubToken,
+    analyzedRepoPathSet,
+    pseudoRoot
+  }) {
+    const maxCommits = githubToken ? 48 : 20
+    const perPage = 100
+    const maxPages = 2
+    const commitShas = []
+
+    for (let page = 1; page <= maxPages && commitShas.length < maxCommits; page++) {
+      const commitList = await fetchCommitList(owner, repo, ref, githubToken, perPage, page)
+      if (!Array.isArray(commitList) || commitList.length === 0) break
+
+      for (const item of commitList) {
+        const sha = item?.sha
+        if (typeof sha === 'string' && sha.length > 0) {
+          commitShas.push(sha)
+          if (commitShas.length >= maxCommits) break
+        }
+      }
+
+      if (commitList.length < perPage) break
+    }
+
+    const uniqueShas = Array.from(new Set(commitShas))
+    const details = await mapLimit(uniqueShas, 4, async (sha) => {
+      try {
+        return await fetchCommitDetail(owner, repo, sha, githubToken)
+      } catch {
+        return null
+      }
+    })
+
+    const fileSets = []
+    for (const detail of details) {
+      const files = Array.isArray(detail?.files) ? detail.files : []
+      const analyzedFiles = files
+        .map(file => file?.filename)
+        .filter(filePath => typeof filePath === 'string' && analyzedRepoPathSet.has(filePath))
+
+      const uniqueRepoPaths = Array.from(new Set(analyzedFiles))
+      if (uniqueRepoPaths.length < 2) continue
+
+      fileSets.push(uniqueRepoPaths.map(repoPath => buildPseudoPath(pseudoRoot, repoPath)))
+    }
+
+    return fileSets
   }
 
   function createLinesPerFileMetric (context) {
@@ -437,6 +544,307 @@
     return { state, visitors, postProcessing }
   }
 
+  function createPackageCouplingMetric (context) {
+    const state = {
+      name: 'Package Coupling',
+      description: 'Measures coupling between repository packages/directories using file dependencies',
+      result: {},
+      id: 'package-coupling',
+      dependencies: ['file-coupling', 'lines-per-file'],
+      status: false
+    }
+
+    const visitors = {
+      Program (path) {
+        state.currentFile = path.node.filePath
+      }
+    }
+
+    function postProcessing (state) {
+      const fileCoupling = state.dependencies['file-coupling'] || {}
+      const linesPerFile = state.dependencies['lines-per-file'] || {}
+      const packageMap = new Map()
+
+      function getOrCreate (packageId) {
+        if (!packageMap.has(packageId)) {
+          packageMap.set(packageId, {
+            fanOutSet: new Set(),
+            fanInSet: new Set(),
+            fileSet: new Set(),
+            outWeights: new Map(),
+            totalLines: 0,
+            internalDependencies: 0,
+            externalDependencies: 0
+          })
+        }
+        return packageMap.get(packageId)
+      }
+
+      for (const [filePath, coupling] of Object.entries(fileCoupling)) {
+        const sourcePackage = getPackageIdFromPseudo(filePath, context.pseudoRoot)
+        const sourceEntry = getOrCreate(sourcePackage)
+        sourceEntry.fileSet.add(filePath)
+        sourceEntry.totalLines += Number(linesPerFile?.[filePath]?.total || 0)
+
+        const fanOut = Array.isArray(coupling?.fanOut) ? coupling.fanOut : []
+        for (const targetFilePath of fanOut) {
+          const targetPackage = getPackageIdFromPseudo(targetFilePath, context.pseudoRoot)
+          const targetEntry = getOrCreate(targetPackage)
+
+          if (sourcePackage === targetPackage) {
+            sourceEntry.internalDependencies += 1
+            continue
+          }
+
+          sourceEntry.externalDependencies += 1
+          sourceEntry.fanOutSet.add(targetPackage)
+          targetEntry.fanInSet.add(sourcePackage)
+          sourceEntry.outWeights.set(targetPackage, (sourceEntry.outWeights.get(targetPackage) || 0) + 1)
+        }
+      }
+
+      const result = {}
+      for (const [packageId, entry] of packageMap.entries()) {
+        const fanOut = Array.from(entry.fanOutSet).sort()
+        const fanIn = Array.from(entry.fanInSet).sort()
+        const afferent = fanIn.length
+        const efferent = fanOut.length
+        const instability = afferent + efferent === 0 ? 0 : roundTo4(efferent / (afferent + efferent))
+
+        result[packageId] = {
+          fanOut,
+          fanIn,
+          weights: Object.fromEntries(entry.outWeights.entries()),
+          files: entry.fileSet.size,
+          lines: Math.max(0, Math.floor(entry.totalLines)),
+          afferent,
+          efferent,
+          instability,
+          internalDependencies: entry.internalDependencies,
+          externalDependencies: entry.externalDependencies
+        }
+      }
+
+      state.result = result
+      delete state.currentFile
+      delete state.dependencies
+      state.status = true
+    }
+
+    return { state, visitors, postProcessing }
+  }
+
+  function createCyclicCouplingMetric () {
+    const state = {
+      name: 'Cyclic Coupling',
+      description: 'Detects strongly connected components and reports coupling edges that belong to cycles',
+      result: {},
+      id: 'cyclic-coupling',
+      dependencies: ['file-coupling', 'lines-per-file'],
+      status: false
+    }
+
+    const visitors = {
+      Program (path) {
+        state.currentFile = path.node.filePath
+      }
+    }
+
+    function postProcessing (state) {
+      const fileCoupling = state.dependencies['file-coupling'] || {}
+      const linesPerFile = state.dependencies['lines-per-file'] || {}
+      const graph = {}
+
+      for (const [filePath, coupling] of Object.entries(fileCoupling)) {
+        const fanOut = Array.isArray(coupling?.fanOut) ? Array.from(new Set(coupling.fanOut)) : []
+        graph[filePath] = fanOut
+        for (const target of fanOut) {
+          if (!graph[target]) graph[target] = []
+        }
+      }
+
+      let index = 0
+      const stack = []
+      const onStack = new Set()
+      const indexMap = new Map()
+      const lowLinkMap = new Map()
+      const sccs = []
+
+      function strongConnect (node) {
+        indexMap.set(node, index)
+        lowLinkMap.set(node, index)
+        index += 1
+        stack.push(node)
+        onStack.add(node)
+
+        for (const neighbor of graph[node] || []) {
+          if (!indexMap.has(neighbor)) {
+            strongConnect(neighbor)
+            lowLinkMap.set(node, Math.min(lowLinkMap.get(node), lowLinkMap.get(neighbor)))
+          } else if (onStack.has(neighbor)) {
+            lowLinkMap.set(node, Math.min(lowLinkMap.get(node), indexMap.get(neighbor)))
+          }
+        }
+
+        if (lowLinkMap.get(node) === indexMap.get(node)) {
+          const component = []
+          while (stack.length > 0) {
+            const top = stack.pop()
+            onStack.delete(top)
+            component.push(top)
+            if (top === node) break
+          }
+          sccs.push(component)
+        }
+      }
+
+      for (const node of Object.keys(graph)) {
+        if (!indexMap.has(node)) strongConnect(node)
+      }
+
+      const cycleIdByNode = new Map()
+      let cycleCounter = 0
+
+      for (const component of sccs) {
+        const hasSelfLoop = component.length === 1 && (graph[component[0]] || []).includes(component[0])
+        if (component.length <= 1 && !hasSelfLoop) continue
+        cycleCounter += 1
+        const cycleId = `cycle-${cycleCounter}`
+        for (const node of component) {
+          cycleIdByNode.set(node, { cycleId, cycleSize: component.length })
+        }
+      }
+
+      const cycleNodes = new Set(cycleIdByNode.keys())
+      const fanInByNode = {}
+      for (const node of cycleNodes) {
+        fanInByNode[node] = []
+      }
+
+      for (const source of cycleNodes) {
+        for (const target of graph[source] || []) {
+          if (!cycleNodes.has(target)) continue
+          const sourceCycle = cycleIdByNode.get(source)?.cycleId
+          const targetCycle = cycleIdByNode.get(target)?.cycleId
+          if (!sourceCycle || sourceCycle !== targetCycle) continue
+          fanInByNode[target].push(source)
+        }
+      }
+
+      const result = {}
+      for (const node of cycleNodes) {
+        const cycleData = cycleIdByNode.get(node)
+        const fanOut = (graph[node] || []).filter((target) => {
+          if (!cycleNodes.has(target)) return false
+          return cycleIdByNode.get(target)?.cycleId === cycleData?.cycleId
+        })
+        const fanIn = Array.from(new Set(fanInByNode[node] || []))
+
+        result[node] = {
+          fanOut: Array.from(new Set(fanOut)),
+          fanIn,
+          cycleId: cycleData?.cycleId || null,
+          cycleSize: cycleData?.cycleSize || 1,
+          lines: Number(linesPerFile?.[node]?.total || 0)
+        }
+      }
+
+      state.result = result
+      delete state.currentFile
+      delete state.dependencies
+      state.status = true
+    }
+
+    return { state, visitors, postProcessing }
+  }
+
+  function createTemporalCouplingMetric (context) {
+    const state = {
+      name: 'Temporal Coupling',
+      description: 'Measures co-change coupling using recent commits in repository history',
+      result: {},
+      id: 'temporal-coupling',
+      dependencies: ['files', 'lines-per-file'],
+      status: false
+    }
+
+    const visitors = {
+      Program (path) {
+        state.currentFile = path.node.filePath
+      }
+    }
+
+    function postProcessing (state) {
+      const linesPerFile = state.dependencies['lines-per-file'] || {}
+      const commitFileSets = Array.isArray(context.temporalCommitFileSets) ? context.temporalCommitFileSets : []
+      if (commitFileSets.length === 0) {
+        state.result = {}
+        delete state.currentFile
+        delete state.dependencies
+        state.status = true
+        return
+      }
+
+      const coChangeMap = new Map()
+
+      function ensureFileMap (filePath) {
+        if (!coChangeMap.has(filePath)) coChangeMap.set(filePath, new Map())
+        return coChangeMap.get(filePath)
+      }
+
+      for (const commitFiles of commitFileSets) {
+        const files = Array.from(new Set((commitFiles || []).filter(filePath => typeof filePath === 'string')))
+        if (files.length < 2) continue
+
+        for (const sourceFile of files) {
+          const sourceMap = ensureFileMap(sourceFile)
+          for (const targetFile of files) {
+            if (targetFile === sourceFile) continue
+            sourceMap.set(targetFile, (sourceMap.get(targetFile) || 0) + 1)
+          }
+        }
+      }
+
+      const result = {}
+      for (const [sourceFile, targetsMap] of coChangeMap.entries()) {
+        const orderedTargets = Array.from(targetsMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 40)
+
+        const fanOut = orderedTargets.map(([target]) => target)
+        const fanIn = []
+        let temporalOut = 0
+        for (const [, weight] of orderedTargets) temporalOut += weight
+
+        for (const [candidateSource, candidateTargets] of coChangeMap.entries()) {
+          if (candidateSource === sourceFile) continue
+          if (candidateTargets.has(sourceFile)) fanIn.push(candidateSource)
+        }
+
+        let temporalIn = 0
+        for (const sourceCandidate of fanIn) {
+          temporalIn += Number(coChangeMap.get(sourceCandidate)?.get(sourceFile) || 0)
+        }
+
+        result[sourceFile] = {
+          fanOut,
+          fanIn: Array.from(new Set(fanIn)),
+          weights: Object.fromEntries(orderedTargets),
+          temporalOut,
+          temporalIn,
+          lines: Number(linesPerFile?.[sourceFile]?.total || 0)
+        }
+      }
+
+      state.result = result
+      delete state.currentFile
+      delete state.dependencies
+      state.status = true
+    }
+
+    return { state, visitors, postProcessing }
+  }
+
   function getMetricModuleUrl (fileName, runToken, options = {}) {
     const cacheBust = `run=${encodeURIComponent(runToken)}`
     const metricBaseUrl = options.metricBaseUrl || self.__VTJMETRICS_METRIC_BASE_URL || 'metric-src'
@@ -495,6 +903,18 @@
       }
       if (metricId === 'function-length') {
         metrics.push(createFunctionLengthMetric(context))
+        continue
+      }
+      if (metricId === 'package-coupling') {
+        metrics.push(createPackageCouplingMetric(context))
+        continue
+      }
+      if (metricId === 'cyclic-coupling') {
+        metrics.push(createCyclicCouplingMetric())
+        continue
+      }
+      if (metricId === 'temporal-coupling') {
+        metrics.push(createTemporalCouplingMetric(context))
         continue
       }
 
@@ -656,6 +1076,7 @@
       throw new Error(`No supported files (.js, .cjs, .ts) found under "${sourcePath}"`)
     }
 
+    const analyzedRepoPathSet = new Set(supportedEntries.map(entry => entry.path))
     const allRepoFilesSet = new Set(blobEntries.map(entry => buildPseudoPath(pseudoRoot, entry.path)))
 
     const fileContentByPseudo = {}
@@ -670,7 +1091,26 @@
       fileName: entry.path.split('/').pop()
     }))
 
-    const context = { pseudoRoot, allRepoFilesSet, fileContentByPseudo }
+    let temporalCommitFileSets = []
+    try {
+      temporalCommitFileSets = await fetchTemporalCommitFileSets({
+        owner,
+        repo,
+        ref: resolvedRef,
+        githubToken,
+        analyzedRepoPathSet,
+        pseudoRoot
+      })
+    } catch {
+      temporalCommitFileSets = []
+    }
+
+    const context = {
+      pseudoRoot,
+      allRepoFilesSet,
+      fileContentByPseudo,
+      temporalCommitFileSets
+    }
     const output = await runEngineOnContext({
       context,
       files,
@@ -682,6 +1122,7 @@
       repo,
       ref: resolvedRef,
       sourcePath: sanitizedSourcePath,
+      temporalCommits: temporalCommitFileSets.length,
       inputType: 'github'
     }
     return output
@@ -757,7 +1198,12 @@
       fileName: repoPath.split('/').pop()
     }))
 
-    const context = { pseudoRoot, allRepoFilesSet, fileContentByPseudo }
+    const context = {
+      pseudoRoot,
+      allRepoFilesSet,
+      fileContentByPseudo,
+      temporalCommitFileSets: []
+    }
     const output = await runEngineOnContext({
       context,
       files,

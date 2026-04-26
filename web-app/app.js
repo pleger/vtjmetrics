@@ -7,12 +7,18 @@
 
   const COUPLING_METRICS = [
     { id: 'file-coupling', label: 'File Coupling', level: 'file' },
+    { id: 'package-coupling', label: 'Package Coupling', level: 'package' },
+    { id: 'cyclic-coupling', label: 'Cyclic Coupling', level: 'file' },
+    { id: 'temporal-coupling', label: 'Temporal Coupling', level: 'file' },
     { id: 'class-coupling', label: 'Class Coupling', level: 'class' },
     { id: 'function-coupling', label: 'Function Coupling', level: 'function' }
   ]
 
   const METRIC_COLOR_BY_ID = {
+    'package-coupling': '#93c5fd',
     'file-coupling': '#7dd3fc',
+    'cyclic-coupling': '#38bdf8',
+    'temporal-coupling': '#1d4ed8',
     'class-coupling': '#38bdf8',
     'function-coupling': '#0284c7'
   }
@@ -25,7 +31,10 @@
     hiddenNodeKeys: [],
     edgeMode: EDGE_MODE_ALL,
     lineThresholdByMetricId: {
+      'package-coupling': 0,
       'file-coupling': 0,
+      'cyclic-coupling': 0,
+      'temporal-coupling': 0,
       'class-coupling': 0,
       'function-coupling': 0
     }
@@ -72,6 +81,20 @@
     const parts = path.split('/').filter(Boolean)
     if (parts.length <= 2) return path
     return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+  }
+
+  function getPackageIdFromFilePath (filePath) {
+    if (!filePath) return '.'
+    const normalized = String(filePath).replace(/^\/+/, '')
+    const parts = normalized.split('/').filter(Boolean)
+    if (parts.length <= 1) return '.'
+    parts.pop()
+    return parts.join('/') || '.'
+  }
+
+  function getPackageLabel (packageId) {
+    if (!packageId || packageId === '.') return '(root package)'
+    return packageId
   }
 
   function toArrayUniqueStrings (value) {
@@ -325,6 +348,7 @@
         metricId: 'file-coupling',
         entityId: filePath,
         filePath,
+        packageId: getPackageIdFromFilePath(filePath),
         label: shortPathLabel(filePath),
         fullLabel: filePath,
         value: Math.max(1, fanIn.length + fanOut.length),
@@ -387,6 +411,7 @@
           metricId: 'class-coupling',
           entityId,
           filePath,
+          packageId: getPackageIdFromFilePath(filePath),
           className,
           label: className,
           fullLabel: `${className} (${shortPathLabel(filePath)})`,
@@ -444,6 +469,7 @@
           metricId: 'function-coupling',
           entityId,
           filePath,
+          packageId: getPackageIdFromFilePath(filePath),
           functionName,
           label: functionName,
           fullLabel: `${functionName} (${shortPathLabel(filePath)})`,
@@ -485,8 +511,144 @@
     return { metricId: 'function-coupling', level: 'function', nodes, links, warnings }
   }
 
+  function extractPackageCouplingGraph () {
+    const result = state.result?.['package-coupling']?.result || {}
+    const nodes = []
+    const links = []
+
+    for (const [packageId, coupling] of Object.entries(result)) {
+      const fanIn = toArrayUniqueStrings(coupling?.fanIn)
+      const fanOut = toArrayUniqueStrings(coupling?.fanOut)
+      const weightMap = coupling?.weights && typeof coupling.weights === 'object' ? coupling.weights : {}
+
+      nodes.push({
+        metricId: 'package-coupling',
+        entityId: packageId,
+        packageId,
+        label: getPackageLabel(packageId),
+        fullLabel: `Package ${getPackageLabel(packageId)}`,
+        value: Math.max(1, fanIn.length + fanOut.length),
+        fanIn: fanIn.length,
+        fanOut: fanOut.length,
+        files: toNonNegativeInt(coupling?.files, 0),
+        lines: toNonNegativeInt(coupling?.lines, 0),
+        instability: typeof coupling?.instability === 'number' ? coupling.instability : 0
+      })
+
+      for (const targetPackage of fanOut) {
+        links.push({
+          metricId: 'package-coupling',
+          sourceEntity: packageId,
+          targetEntity: targetPackage,
+          weight: Math.max(1, toNonNegativeInt(weightMap[targetPackage], 1))
+        })
+      }
+    }
+
+    return { metricId: 'package-coupling', level: 'package', nodes, links, warnings: [] }
+  }
+
+  function extractCyclicCouplingGraph () {
+    const result = state.result?.['cyclic-coupling']?.result || {}
+    const nodes = []
+    const links = []
+    const cycleSizes = []
+
+    for (const [filePath, coupling] of Object.entries(result)) {
+      const fanIn = toArrayUniqueStrings(coupling?.fanIn)
+      const fanOut = toArrayUniqueStrings(coupling?.fanOut)
+      const lineInfo = getFileLineInfo(filePath)
+      const cycleSize = toNonNegativeInt(coupling?.cycleSize, 1)
+      cycleSizes.push(cycleSize)
+
+      nodes.push({
+        metricId: 'cyclic-coupling',
+        entityId: filePath,
+        filePath,
+        packageId: getPackageIdFromFilePath(filePath),
+        label: shortPathLabel(filePath),
+        fullLabel: `${filePath} (${coupling?.cycleId || 'cycle'})`,
+        value: Math.max(1, fanIn.length + fanOut.length),
+        fanIn: fanIn.length,
+        fanOut: fanOut.length,
+        cycleId: coupling?.cycleId || null,
+        cycleSize,
+        lines: lineInfo.lines,
+        startLine: 1
+      })
+
+      for (const target of fanOut) {
+        links.push({
+          metricId: 'cyclic-coupling',
+          sourceEntity: filePath,
+          targetEntity: target,
+          weight: Math.max(1, cycleSize)
+        })
+      }
+    }
+
+    const uniqueCycles = new Set(nodes.map(node => node.cycleId).filter(Boolean))
+    const warnings = []
+    if (nodes.length === 0) warnings.push('Cyclic-coupling: no dependency cycles detected in the selected source path.')
+    if (uniqueCycles.size > 0) warnings.push(`Cyclic-coupling: detected ${uniqueCycles.size} cycle(s), max cycle size ${Math.max(1, ...cycleSizes)}.`)
+
+    return { metricId: 'cyclic-coupling', level: 'file', nodes, links, warnings }
+  }
+
+  function extractTemporalCouplingGraph () {
+    const result = state.result?.['temporal-coupling']?.result || {}
+    const nodes = []
+    const links = []
+
+    for (const [filePath, coupling] of Object.entries(result)) {
+      const fanIn = toArrayUniqueStrings(coupling?.fanIn)
+      const fanOut = toArrayUniqueStrings(coupling?.fanOut)
+      const weightMap = coupling?.weights && typeof coupling.weights === 'object' ? coupling.weights : {}
+      const lineInfo = getFileLineInfo(filePath)
+
+      nodes.push({
+        metricId: 'temporal-coupling',
+        entityId: filePath,
+        filePath,
+        packageId: getPackageIdFromFilePath(filePath),
+        label: shortPathLabel(filePath),
+        fullLabel: filePath,
+        value: Math.max(1, fanIn.length + fanOut.length),
+        fanIn: fanIn.length,
+        fanOut: fanOut.length,
+        temporalIn: toNonNegativeInt(coupling?.temporalIn, 0),
+        temporalOut: toNonNegativeInt(coupling?.temporalOut, 0),
+        lines: lineInfo.lines,
+        startLine: 1
+      })
+
+      for (const target of fanOut) {
+        links.push({
+          metricId: 'temporal-coupling',
+          sourceEntity: filePath,
+          targetEntity: target,
+          weight: Math.max(1, toNonNegativeInt(weightMap[target], 1))
+        })
+      }
+    }
+
+    const warnings = []
+    const temporalSamples = toNonNegativeInt(state.result?._meta?.temporalCommits, 0)
+    if (nodes.length === 0) {
+      if (temporalSamples > 0) warnings.push('Temporal-coupling: recent commits were analyzed, but no co-change links were found for files in this source path.')
+      else warnings.push('Temporal-coupling: unavailable (no commit history analyzed for current context).')
+    } else if (temporalSamples > 0) {
+      warnings.push(`Temporal-coupling: built from ${temporalSamples} recent commit(s).`)
+    }
+
+    return { metricId: 'temporal-coupling', level: 'file', nodes, links, warnings }
+  }
+
   function buildGraphByMetricId (metricId) {
+    if (metricId === 'package-coupling') return extractPackageCouplingGraph()
     if (metricId === 'file-coupling') return extractFileCouplingGraph()
+    if (metricId === 'cyclic-coupling') return extractCyclicCouplingGraph()
+    if (metricId === 'temporal-coupling') return extractTemporalCouplingGraph()
     if (metricId === 'class-coupling') return extractClassCouplingGraph()
     if (metricId === 'function-coupling') return extractFunctionCouplingGraph()
     return null
@@ -494,9 +656,14 @@
 
   function resolveParentEntityId (childNode, childLevel, parentLevel) {
     if (!parentLevel) return null
+    if (childLevel === 'package' && parentLevel === 'package') return childNode.packageId || null
+    if (childLevel === 'file' && parentLevel === 'package') return childNode.packageId || getPackageIdFromFilePath(childNode.filePath)
+    if (childLevel === 'file' && parentLevel === 'file') return childNode.filePath || null
     if (childLevel === 'class' && parentLevel === 'file') return childNode.filePath
+    if (childLevel === 'class' && parentLevel === 'package') return childNode.packageId || getPackageIdFromFilePath(childNode.filePath)
     if (childLevel === 'function' && parentLevel === 'class') return childNode.classEntityId || null
     if (childLevel === 'function' && parentLevel === 'file') return childNode.filePath
+    if (childLevel === 'function' && parentLevel === 'package') return childNode.packageId || getPackageIdFromFilePath(childNode.filePath)
     return null
   }
 

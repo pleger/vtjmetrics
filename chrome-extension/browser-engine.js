@@ -868,10 +868,13 @@
       }
     })()
 
+    const isFileScheme = absoluteBase.startsWith('file:')
+    const suffix = isFileScheme ? '' : `?${cacheBust}`
+
     try {
-      return new URL(`${fileName}?${cacheBust}`, absoluteBase).href
+      return new URL(`${fileName}${suffix}`, absoluteBase).href
     } catch {
-      return `${absoluteBase}${fileName}?${cacheBust}`
+      return `${absoluteBase}${fileName}${suffix}`
     }
   }
 
